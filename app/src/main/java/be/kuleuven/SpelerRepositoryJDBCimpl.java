@@ -2,10 +2,11 @@ package be.kuleuven;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import com.mysql.jdbc.PreparedStatement;
-import com.mysql.jdbc.Statement;
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 
 public class SpelerRepositoryJDBCimpl implements SpelerRepository {
   private Connection connection;
@@ -18,15 +19,8 @@ public class SpelerRepositoryJDBCimpl implements SpelerRepository {
   @Override
   public void addSpelerToDb(Speler speler) {
     try {
-      // // WITHOUT prepared statement
-      // Statement s = (Statement) connection.createStatement();
-      // int goedBezig = student.isGoedBezig() ? 1 : 0;
-      // s.executeUpdate("INSERT INTO student (studnr, naam, voornaam, goedbezig) VALUES (" + student.getStudnr() + ", '" + student.getNaam() + "', '" + student.getVoornaam() + "', " + goedBezig + ");");
-      // s.close();
-
-      // WITH prepared statement
       PreparedStatement prepared = (PreparedStatement) connection
-          .prepareStatement("INSERT INTO speler (tennisvlaanderenId, naam, punten) VALUES (?, ?, ?, ?);");
+          .prepareStatement("INSERT INTO speler (tennisvlaanderenId, naam, punten) VALUES (?, ?, ?);");
       prepared.setInt(1, speler.getTennisvlaanderenid()); // First questionmark
       prepared.setString(2, speler.getNaam()); // Second questionmark
       prepared.setInt(3, speler.getPunten()); // Third questionmark // Fourth questionmark
@@ -97,10 +91,10 @@ public class SpelerRepositoryJDBCimpl implements SpelerRepository {
     try {
       // WITH prepared statement
       PreparedStatement prepared = (PreparedStatement) connection
-          .prepareStatement("UPDATE speler SET naam = ?, punten = ?, tennisvlaanderenid = ?;");
-      prepared.setInt(1, speler.getTennisvlaanderenid()); // First questionmark
-      prepared.setString(2, speler.getNaam()); // Second questionmark
-      prepared.setInt(3, speler.getPunten()); // Third questionmark // Fourth questionmark
+          .prepareStatement("UPDATE speler SET naam = ?, punten = ? WHERE tennisvlaanderenid = ?;");
+      prepared.setInt(3, speler.getTennisvlaanderenid()); 
+      prepared.setString(1, speler.getNaam()); 
+      prepared.setInt(2, speler.getPunten()); 
       prepared.executeUpdate();
 
       prepared.close();
@@ -129,73 +123,90 @@ public class SpelerRepositoryJDBCimpl implements SpelerRepository {
 
   @Override
   public String getHoogsteRankingVanSpeler(int tennisvlaanderenid) {
-    String hoogsteRanking = null;
+    String besteTornooi = null; // Declare outside the try block
+    String besteFase = null;    // Declare outside the try block
+
     try {
-        // Prepare the SQL query to get the highest ranking
-        PreparedStatement prepared = (PreparedStatement) connection
-            .prepareStatement("SELECT MAX(ranking) AS hoogsteRanking FROM speler_ranking WHERE tennisvlaanderenID = ?");
-        prepared.setInt(1, tennisvlaanderenid);
+        String query = "SELECT w.finale, w.winnaar, t.clubnaam " +
+                       "FROM wedstrijd w JOIN tornooi t ON w.tornooi = t.id " +
+                       "WHERE w.speler1 = ? OR w.speler2 = ?";
+        PreparedStatement stmt = connection.prepareStatement(query);
+        stmt.setInt(1, tennisvlaanderenid);
+        stmt.setInt(2, tennisvlaanderenid);
 
-        // Execute the query
-        ResultSet result = prepared.executeQuery();
+        ResultSet rs = stmt.executeQuery();
 
-        // Retrieve the highest ranking from the result set
-        if (result.next()) {
-            hoogsteRanking = result.getString("hoogsteRanking");
+        int hoogsteScore = -1;
+
+        while (rs.next()) {
+            int finale = rs.getInt("finale");
+            int winnaar = rs.getInt("winnaar");
+            String clubnaam = rs.getString("clubnaam");
+
+            int score = switch (finale) {
+                case 1 -> (winnaar == tennisvlaanderenid) ? 3 : 2;
+                case 2 -> 1;
+                default -> 0;
+            };
+
+            if (score > hoogsteScore) {
+                hoogsteScore = score;
+                besteTornooi = clubnaam;
+                besteFase = switch (score) {
+                    case 3 -> "winst";
+                    case 2 -> "finale";
+                    case 1 -> "halve finale";
+                    default -> null;
+                };
+            }
         }
 
-        // Close resources
-        result.close();
-        prepared.close();
-        connection.commit();
-
-        // If no ranking is found, throw an exception
-        if (hoogsteRanking == null) {
-            throw new InvalidSpelerException("No ranking found for speler with ID: " + tennisvlaanderenid);
+        if (besteTornooi == null || besteFase == null) {
+            throw new InvalidSpelerException(String.valueOf(tennisvlaanderenid));
         }
-    } catch (Exception e) {
-        throw new RuntimeException(e);
+
+        rs.close();
+        stmt.close();
+
+    } catch (SQLException e) {
+        throw new InvalidSpelerException(String.valueOf(tennisvlaanderenid));
     }
-    return hoogsteRanking;
-  }
+
+    String resultaat = "Hoogst geplaatst in het tornooi van " + besteTornooi + " met plaats in de " + besteFase;
+    return resultaat;
+}
 
   @Override
   public void addSpelerToTornooi(int tornooiId, int tennisvlaanderenId) {
+    //DONE: verwijder de "throw new UnsupportedOperationException" en schrijf de code die de gewenste methode op de juiste manier implementeert zodat de testen slagen.
+
     try {
-        // Prepare the SQL query to add a speler to a tornooi
-        PreparedStatement prepared = (PreparedStatement) connection
-            .prepareStatement("INSERT INTO tornooi_speler (tornooiId, tennisvlaanderenId) VALUES (?, ?)");
-        prepared.setInt(1, tornooiId); // First question mark
-        prepared.setInt(2, tennisvlaanderenId); // Second question mark
-
-        // Execute the update
-        prepared.executeUpdate();
-
-        // Close resources
-        prepared.close();
+        PreparedStatement stmt = connection.prepareStatement(
+            "INSERT INTO speler_speelt_tornooi (speler, tornooi) VALUES (?, ?)");
+        stmt.setInt(1, tennisvlaanderenId);
+        stmt.setInt(2, tornooiId);
+        stmt.executeUpdate();
+        stmt.close();
         connection.commit();
-    } catch (Exception e) {
-        throw new RuntimeException("Failed to add speler to tornooi: " + e.getMessage(), e);
-    }
-  }
+      } catch (Exception e) {
+        throw new InvalidSpelerException(String.valueOf(tennisvlaanderenId));    
+     }
+}
 
-  @Override
-  public void removeSpelerFromTornooi(int tornooiId, int tennisvlaanderenId) {
+@Override
+public void removeSpelerFromTornooi(int tornooiId, int tennisvlaanderenId) {
+    //DONE: verwijder de "throw new UnsupportedOperationException" en schrijf de code die de gewenste methode op de juiste manier implementeert zodat de testen slagen.
+
     try {
-        // Prepare the SQL query to remove a speler from a tornooi
-        PreparedStatement prepared = (PreparedStatement) connection
-            .prepareStatement("DELETE FROM tornooi_speler WHERE tornooiId = ? AND tennisvlaanderenId = ?");
-        prepared.setInt(1, tornooiId); // First question mark
-        prepared.setInt(2, tennisvlaanderenId); // Second question mark
-
-        // Execute the update
-        prepared.executeUpdate();
-
-        // Close resources
-        prepared.close();
+        PreparedStatement stmt = connection.prepareStatement(
+            "DELETE FROM speler_speelt_tornooi WHERE speler = ? AND tornooi = ?");
+        stmt.setInt(1, tennisvlaanderenId);
+        stmt.setInt(2, tornooiId);
+        stmt.executeUpdate();
+        stmt.close();
         connection.commit();
-    } catch (Exception e) {
-        throw new RuntimeException("Failed to remove speler from tornooi: " + e.getMessage(), e);
+      } catch (Exception e) {
+        throw new InvalidSpelerException(String.valueOf(tennisvlaanderenId));    
     }
   }
 }
