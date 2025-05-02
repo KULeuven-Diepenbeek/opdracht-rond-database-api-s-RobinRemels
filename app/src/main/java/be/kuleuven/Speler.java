@@ -60,9 +60,10 @@ public class Speler {
     return tennisvlaanderenId;
   }
 
-  public void setTennisvlaanderenId(int tennisvlaanderenId) {
+  public void setTennisvlaanderenid(int tennisvlaanderenId) {
     this.tennisvlaanderenId = tennisvlaanderenId;
   }
+  
 
   public String getNaam() {
     return naam;
